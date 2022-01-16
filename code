@@ -1,0 +1,1127 @@
+#define _USE_MATH_DEFINES
+#include<math.h>
+#include<stdio.h>
+#include<string.h>
+#include<iostream>
+#include<windows.h>
+#include<time.h>
+
+using namespace std;
+
+extern "C" {
+#include"./SDL2-2.0.10/include/SDL.h"
+#include"./SDL2-2.0.10/include/SDL_main.h"
+}
+
+#define HOW_MANY_GRAPHICS               24              //number of unique graphics
+#define BOOM_SPEED                      30
+#define ANIM_SPEED                      100
+#define ANIM_COMPLEXITY                 4
+#define SHOW_BONUS_TIME                 100
+#define SCREEN_WIDTH                    640             //pixels
+#define SCREEN_HEIGHT                   480             //pixels
+#define GAME_SPEED                      1.5             //the higher the number, the slower the game
+#define START_LIVES                     3               //how many lives player starts with
+#define CHARACTER_WIDTH                 80              //pixels
+#define CHARACTER_HEIGHT                128             //pixels
+#define CHARACTER_START_W               70              //starting position of player in pixels
+#define CHARACTER_START_H               200             //
+#define BLOCK_SIZE                      64              //pixels
+#define STAR_SIZE                       128             //pixels
+#define FAIRY_SIZE                      32              //pixels
+#define MAP_WIDTH                       56
+#define MAP_HEIGHT                      1024
+#define ACCELERATION_RATE               1600
+#define BASE_RUN_SPEED                  0.5
+#define MAX_SPEED                       8
+#define FALL_SPEED                      0.4
+#define DASH_LENGTH                     150
+#define DASH_STRENGTH                   1
+#define INITIAL_JUMP_FORCE              4
+#define JUMP_SPEED                      0.4
+#define JUMP_SLOWING                    0.01
+#define APPEAR_CHANCE                   100             //percentage
+#define STAR_POINTS                     100
+#define FAIRY_POINTS                    10
+#define MAX_FAIRY_DISTANCE              32              //pixels
+#define HORIZONTAL_DIST                 CHARACTER_WIDTH / 2 + BLOCK_SIZE / 2    //distance of colision
+#define VERTICAL_DIST                   CHARACTER_HEIGHT / 2 + BLOCK_SIZE / 2   //
+
+
+// narysowanie napisu txt na powierzchni screen, zaczynając od punktu (x, y)
+// charset to bitmapa 128x128 zawierająca znaki
+// draw a text txt on surface screen, starting from the point (x, y)
+// charset is a 128x128 bitmap containing character images
+void DrawString(SDL_Surface *screen, int x, int y, const char *text,
+                SDL_Surface *charset) {
+        int px, py, c;
+        SDL_Rect s, d;
+        s.w = 8;
+        s.h = 8;
+        d.w = 8;
+        d.h = 8;
+        while(*text) {
+                c = *text & 255;
+                px = (c % 16) * 8;
+                py = (c / 16) * 8;
+                s.x = px;
+                s.y = py;
+                d.x = x;
+                d.y = y;
+                SDL_BlitSurface(charset, &s, screen, &d);
+                x += 8;
+                text++;
+                
+};
+        
+};
+
+
+// narysowanie na ekranie screen powierzchni sprite w punkcie (x, y)
+// (x, y) to punkt środka obrazka sprite na ekranie
+// draw a surface sprite on a surface screen in point (x, y)
+// (x, y) is the center of sprite on screen
+void DrawSurface(SDL_Surface *screen, SDL_Surface *sprite, int x, int y) {
+        SDL_Rect dest;
+        dest.x = x - sprite->w / 2;
+        dest.y = y - sprite->h / 2;
+        dest.w = sprite->w;
+        dest.h = sprite->h;
+        SDL_BlitSurface(sprite, NULL, screen, &dest);
+        
+};
+
+
+// rysowanie pojedynczego pixela
+// draw a single pixel
+void DrawPixel(SDL_Surface *surface, int x, int y, Uint32 color) {
+        int bpp = surface->format->BytesPerPixel;
+        Uint8 *p = (Uint8 *)surface->pixels + y * surface->pitch + x * bpp;
+        *(Uint32 *)p = color;
+        
+};
+
+
+// rysowanie linii o długości l w pionie (gdy dx = 0, dy = 1) 
+// bądź poziomie (gdy dx = 1, dy = 0)
+// draw a vertical (when dx = 0, dy = 1) or horizontal (when dx = 1, dy = 0) line
+void DrawLine(SDL_Surface *screen, int x, int y, int l, int dx, int dy, Uint32 color) {
+        for(int i = 0; i < l; i++) {
+                DrawPixel(screen, x, y, color);
+                x += dx;
+                y += dy;
+                
+};
+        
+};
+
+
+// rysowanie prostokąta o długości boków l i k
+// draw a rectangle of size l by k
+void DrawRectangle(SDL_Surface *screen, int x, int y, int l, int k,
+                   Uint32 outlineColor, Uint32 fillColor) {
+        int i;
+        DrawLine(screen, x, y, k, 0, 1, outlineColor);
+        DrawLine(screen, x + l - 1, y, k, 0, 1, outlineColor);
+        DrawLine(screen, x, y, l, 1, 0, outlineColor);
+        DrawLine(screen, x, y + k - 1, l, 1, 0, outlineColor);
+        for(i = y + 1; i < y + k - 1; i++)
+                DrawLine(screen, x + 1, i, l - 2, 1, 0, fillColor);
+        
+};
+
+#ifdef __cplusplus
+extern "C"
+#endif
+
+void preamble(char thing_placement[11], int* how_many_blocks, int* how_many_stars, int* how_many_fairies)
+{
+        int i;
+        for (i = 0; thing_placement[i] != ' '; i++) {
+                *how_many_blocks = 10 * (*how_many_blocks) + thing_placement[i] - '0';
+        
+}
+        i++;
+        for (; thing_placement[i] != ' '; i++) {
+                *how_many_stars = 10 * (*how_many_stars) + thing_placement[i] - '0';
+        
+}
+        i++;
+        for (; thing_placement[i] != '\n'; i++) {
+                *how_many_fairies = 10 * (*how_many_fairies) + thing_placement[i] - '0';
+        
+}
+}
+
+void interpretationOfLine(char thing_placement[11], double* things[2], double* start_things[2], int thing_num)
+{
+        start_things[0][thing_num] = 0;
+        start_things[1][thing_num] = 0;
+        things[0][thing_num] = 0;
+        things[1][thing_num] = 0;
+        int i = 0;
+        for (; thing_placement[i] != ' '; i++) {
+                things[0][thing_num] = 10 * things[0][thing_num] + thing_placement[i] - '0';
+        
+}
+        i++;
+        for (; thing_placement[i] != '\0' && thing_placement[i] != '\n'; i++) {
+                things[1][thing_num] = 10 * things[1][thing_num] + thing_placement[i] - '0';
+        
+}
+        things[0][thing_num] *= BLOCK_SIZE;
+        things[1][thing_num] *= BLOCK_SIZE;
+        start_things[0][thing_num] = things[0][thing_num];
+        start_things[1][thing_num] = things[1][thing_num];
+}
+
+void randomizeThings(bool* show_things, int how_many_things)
+{
+        for (int i = 0; i < how_many_things; i++) {
+                if (rand() % 100 < APPEAR_CHANCE) show_things[i] = 1;
+                else show_things[i] = 0;
+                cout << show_things[i];
+        
+}
+}
+
+bool checkCollisionV(int how_many_blocks, double *blocks[2], double c_width, double c_height, bool fall)
+{
+        for (int i = 0; i < how_many_blocks; i++) {
+                if (abs(blocks[1][i] - c_height) > (VERTICAL_DIST - 1) && abs(blocks[1][i] - c_height) < (VERTICAL_DIST + 1) && abs(blocks[0][i] - c_width) < (HORIZONTAL_DIST)) {
+                        if (fall && c_height > blocks[1][i]) return 1;
+                        return 0;
+                
+}
+        
+}
+        return 1;
+}
+
+bool checkCollision(int how_many_blocks, double* blocks[2], double c_width, double c_height)
+{
+        for (int i = 0; i < how_many_blocks; i++) {
+                if (abs(blocks[1][i] - c_height) < (VERTICAL_DIST) && (blocks[0][i] - c_width) > (HORIZONTAL_DIST - 1) && (blocks[0][i] - c_width) < (HORIZONTAL_DIST + 1)) return 1;
+        
+}
+        return 0;
+}
+
+bool checkCollision2(int how_many_things, double* things[2], int thing_size, double c_width, double c_height, bool* show_things, bool dash, bool *explode, int *points, bool fairy, int *multiplayer, int* bonus)
+{
+        int vertical = thing_size / 2 + CHARACTER_HEIGHT / 2, horizontal = thing_size / 2 + CHARACTER_WIDTH / 2;
+        for (int i = 0; i < how_many_things; i++) {
+                if (abs(things[1][i] - c_height) < vertical && abs(things[0][i] - c_width) < horizontal && show_things[i]) {
+                        if (dash || fairy) {
+                                show_things[i] = 0;
+                                if (dash && !fairy) {
+                                        explode[i] = 1;
+                                        *bonus = STAR_POINTS * multiplayer[!fairy];
+                                        *points += *bonus;
+                                        multiplayer[!fairy]++;
+                                
+}
+                                else {
+                                        *bonus = FAIRY_POINTS * multiplayer[!fairy];
+                                        *points += *bonus;
+                                        multiplayer[!fairy]++;
+                                
+}
+                                return 0;
+                        
+}
+                        return 1;
+                
+}
+                else if (show_things[i] && c_width > things[0][i]) multiplayer[!fairy] = 1;
+        
+}
+        return 0;
+}
+
+void randomizeMovement(double* fairies[2], int random_move[2], int how_many_fairies)
+{
+        for (int j = 0; j < 2; j++) {
+                if (rand() % 2 && random_move[j] < MAX_FAIRY_DISTANCE) {
+                        random_move[j]++;
+                        for (int i = 0; i < how_many_fairies; i++) {
+                                fairies[j][i]++;
+                        
+}
+                
+}
+                else if (random_move[j] > MAX_FAIRY_DISTANCE * (-1)) {
+                        random_move[j]--;
+                        for (int i = 0; i < how_many_fairies; i++) {
+                                fairies[j][i]--;
+                        
+}
+                
+}
+        
+}
+}
+
+int main(int argc, char **argv) {
+        int anime = 0, animate = 0, boom = 0, timer = 0, bomb = 0;
+        int timer2 = 0;
+        double move = 0;
+        int speed = 1, speed1 = 0;
+
+        bool jump = 0, double_jump = 0, dash = 0, dash1 = 1;
+        short int jumps = 0, dash_count = 0;
+        double jump_h = 0;
+        double fall = 0;
+        double jump_a = INITIAL_JUMP_FORCE;
+
+        double background_pos[2];
+
+        bool menu = 1, game = 0, death = 0, end_of_game = 0;
+        bool game_type = 1, go = 0;
+
+        int lives = START_LIVES, points = 0;
+
+        int t1, t2, t3, quit, frames, rc;
+        double delta, worldTime, fpsTimer, fps;
+        int worldTime2, worldTime3;
+
+        FILE* level;
+        char line[11];
+        int how_many_blocks = 0;
+        int how_many_stars = 0;
+        int how_many_fairies = 0;
+        level = fopen("bloki.txt", "r");
+        fgets(line, 11, level);
+        preamble(line, &how_many_blocks, &how_many_stars, &how_many_fairies);
+
+        double alt_pos = 0, real_height = CHARACTER_START_H;
+        int random_move[2] = { 0, 0 
+};
+        
+        int multiplayer[2] = { 1, 1 
+};
+        int bonus = 0;
+
+        double* blocks[2];
+        blocks[0] = (double*)malloc(how_many_blocks * sizeof(double));
+        blocks[1] = (double*)malloc(how_many_blocks * sizeof(double));
+        double* start_blocks[2];
+        start_blocks[0] = (double*)malloc(how_many_blocks * sizeof(double));
+        start_blocks[1] = (double*)malloc(how_many_blocks * sizeof(double));
+
+        double* stars[2];
+        stars[0] = (double*)malloc(how_many_stars * sizeof(double));
+        stars[1] = (double*)malloc(how_many_stars * sizeof(double));
+        double* start_stars[2];
+        start_stars[0] = (double*)malloc(how_many_stars * sizeof(double));
+        start_stars[1] = (double*)malloc(how_many_stars * sizeof(double));
+        bool* show_stars = (bool*)malloc(how_many_stars * sizeof(bool));
+        bool* explode = (bool*)malloc(how_many_stars * sizeof(bool));
+
+        double* fairies[2];
+        fairies[0] = (double*)malloc(how_many_fairies * sizeof(double));
+        fairies[1] = (double*)malloc(how_many_fairies * sizeof(double));
+        double* start_fairies[2];
+        start_fairies[0] = (double*)malloc(how_many_fairies * sizeof(double));
+        start_fairies[1] = (double*)malloc(how_many_fairies * sizeof(double));
+        bool* show_fairies = (bool*)malloc(how_many_fairies * sizeof(bool));
+
+
+        SDL_Event event;
+        SDL_Surface *graphics[HOW_MANY_GRAPHICS];
+        SDL_Surface *screen, *charset;
+        SDL_Surface *star, *fairy[4], *block, *explosion[4];
+        SDL_Surface *menu_screen, *death_screen, *gameover, *background; 
+        SDL_Surface *unicorn[4], *unicornJump, * unicornDash, * unicornFall, *heart, *heart2;
+        SDL_Texture *scrtex;
+        SDL_Window *window;
+        SDL_Renderer *renderer;
+
+        int surface_num = 0;
+
+        // okno konsoli nie jest widoczne, jeżeli chcemy zobaczyć
+        // komunikaty wypisywane printf-em trzeba w opcjach:
+        // project -> szablon2 properties -> Linker -> System -> Subsystem
+        // zmienić na "Console"
+        // console window is not visible, to see the printf output
+        // the option:
+        // project -> szablon2 properties -> Linker -> System -> Subsystem
+        // must be changed to "Console"
+        printf("wyjscie printfa trafia do tego okienka\n");
+        printf("printf output goes here\n");
+
+        if(SDL_Init(SDL_INIT_EVERYTHING) != 0) {
+                printf("SDL_Init error: %s\n", SDL_GetError());
+                return 1;
+                
+}
+
+        // tryb pełnoekranowy / fullscreen mode
+//      rc = SDL_CreateWindowAndRenderer(0, 0, SDL_WINDOW_FULLSCREEN_DESKTOP,
+//                                       &window, &renderer);
+        rc = SDL_CreateWindowAndRenderer(SCREEN_WIDTH, SCREEN_HEIGHT, 0,
+                                         &window, &renderer);
+        if(rc != 0) {
+                SDL_Quit();
+                printf("SDL_CreateWindowAndRenderer error: %s\n", SDL_GetError());
+                return 1;
+                
+};
+        
+        SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "linear");
+        SDL_RenderSetLogicalSize(renderer, SCREEN_WIDTH, SCREEN_HEIGHT);
+        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+
+        SDL_SetWindowTitle(window, "UNICORN ATTACK OF A ROBOT OR SOMETHING");
+
+
+        screen = SDL_CreateRGBSurface(0, SCREEN_WIDTH, SCREEN_HEIGHT, 32,
+                                      0x00FF0000, 0x0000FF00, 0x000000FF, 0xFF000000);
+
+        scrtex = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
+                                   SDL_TEXTUREACCESS_STREAMING,
+                                   SCREEN_WIDTH, SCREEN_HEIGHT);
+
+
+        // wyłączenie widoczności kursora myszy
+        SDL_ShowCursor(SDL_DISABLE);
+
+        charset = SDL_LoadBMP("./cs8x8.bmp");
+        if (charset != NULL) {
+                graphics[surface_num] = charset;
+                surface_num++;
+                SDL_SetColorKey(charset, true, 0x000000);
+        
+}
+        star = SDL_LoadBMP("./star.bmp");
+        if (star != NULL) {
+                graphics[surface_num] = star;
+                surface_num++;
+                SDL_SetColorKey(star, true, 0xFFFFFF);
+        
+}
+        fairy[0] = SDL_LoadBMP("./fairy0.bmp");
+        if (fairy[0] != NULL) {
+                graphics[surface_num] = fairy[0];
+                surface_num++;
+                SDL_SetColorKey(fairy[0], true, 0xFFFFFF);
+        
+}
+        fairy[1] = SDL_LoadBMP("./fairy1.bmp");
+        if (fairy[1] != NULL) {
+                graphics[surface_num] = fairy[1];
+                surface_num++;
+                SDL_SetColorKey(fairy[1], true, 0xFFFFFF);
+        
+}
+        fairy[2] = SDL_LoadBMP("./fairy2.bmp");
+        if (fairy[2] != NULL) {
+                graphics[surface_num] = fairy[2];
+                surface_num++;
+                SDL_SetColorKey(fairy[2], true, 0xFFFFFF);
+        
+}
+        fairy[3] = SDL_LoadBMP("./fairy3.bmp");
+        if (fairy[3] != NULL) {
+                graphics[surface_num] = fairy[3];
+                surface_num++;
+                SDL_SetColorKey(fairy[3], true, 0xFFFFFF);
+        
+}
+        menu_screen = SDL_LoadBMP("./menu.bmp");
+        if (menu_screen != NULL) {
+                graphics[surface_num] = menu_screen;
+                surface_num++;
+        
+}
+        death_screen = SDL_LoadBMP("./death.bmp");
+        if (death_screen != NULL) {
+                graphics[surface_num] = death_screen;
+                surface_num++;
+        
+}
+        gameover = SDL_LoadBMP("./gameover.bmp");
+        if (gameover != NULL) {
+                graphics[surface_num] = gameover;
+                surface_num++;
+        
+}
+        background = SDL_LoadBMP("./background.bmp");
+        if (background != NULL) {
+                graphics[surface_num] = background;
+                surface_num++;
+        
+}
+        block = SDL_LoadBMP("./block.bmp");
+        if (block != NULL) {
+                graphics[surface_num] = block;
+                surface_num++;
+        
+}
+        unicorn[0] = SDL_LoadBMP("./unicorn0.bmp");
+        if (unicorn[0] != NULL) {
+                graphics[surface_num] = unicorn[0];
+                surface_num++;
+                SDL_SetColorKey(unicorn[0], true, 0xFFFFFF);
+        
+}
+        unicorn[1] = SDL_LoadBMP("./unicorn1.bmp");
+        if (unicorn[1] != NULL) {
+                graphics[surface_num] = unicorn[1];
+                surface_num++;
+                SDL_SetColorKey(unicorn[1], true, 0xFFFFFF);
+        
+}
+        unicorn[2] = SDL_LoadBMP("./unicorn2.bmp");
+        if (unicorn[2] != NULL) {
+                graphics[surface_num] = unicorn[2];
+                surface_num++;
+                SDL_SetColorKey(unicorn[2], true, 0xFFFFFF);
+        
+}
+        unicorn[3] = SDL_LoadBMP("./unicorn3.bmp");
+        if (unicorn[3] != NULL) {
+                graphics[surface_num] = unicorn[3];
+                surface_num++;
+                SDL_SetColorKey(unicorn[3], true, 0xFFFFFF);
+        
+}
+        unicornJump = SDL_LoadBMP("./unicornJump.bmp");
+        if (unicornJump != NULL) {
+                graphics[surface_num] = unicornJump;
+                surface_num++;
+                SDL_SetColorKey(unicornJump, true, 0xFFFFFF);
+        
+}
+        unicornDash = SDL_LoadBMP("./unicornDash.bmp");
+        if (unicornDash != NULL) {
+                graphics[surface_num] = unicornDash;
+                surface_num++;
+                SDL_SetColorKey(unicornDash, true, 0xFFFFFF);
+        
+}
+        unicornFall = SDL_LoadBMP("./unicornFall.bmp");
+        if (unicornFall != NULL) {
+                graphics[surface_num] = unicornFall;
+                surface_num++;
+                SDL_SetColorKey(unicornFall, true, 0xFFFFFF);
+        
+}
+        heart = SDL_LoadBMP("./heart.bmp");
+        if (heart != NULL) {
+                graphics[surface_num] = heart;
+                surface_num++;
+                SDL_SetColorKey(heart, true, 0xFFFFFF);
+        
+}
+        heart2 = SDL_LoadBMP("./heart2.bmp");
+        if (heart2 != NULL) {
+                graphics[surface_num] = heart2;
+                surface_num++;
+                SDL_SetColorKey(heart2, true, 0xFFFFFF);
+        
+}
+        explosion[0] = SDL_LoadBMP("./explosion0.bmp");
+        if (explosion[0] != NULL) {
+                graphics[surface_num] = explosion[0];
+                surface_num++;
+                SDL_SetColorKey(explosion[0], true, 0xFFFFFF);
+        
+}
+        explosion[1] = SDL_LoadBMP("./explosion1.bmp");
+        if (explosion[1] != NULL) {
+                graphics[surface_num] = explosion[1];
+                surface_num++;
+                SDL_SetColorKey(explosion[1], true, 0xFFFFFF);
+        
+}
+        explosion[2] = SDL_LoadBMP("./explosion2.bmp");
+        if (explosion[2] != NULL) {
+                graphics[surface_num] = explosion[2];
+                surface_num++;
+                SDL_SetColorKey(explosion[2], true, 0xFFFFFF);
+        
+}
+        explosion[3] = SDL_LoadBMP("./explosion3.bmp");
+        if (explosion[3] != NULL) {
+                graphics[surface_num] = explosion[3];
+                surface_num++;
+                SDL_SetColorKey(explosion[3], true, 0xFFFFFF);
+        
+}
+        if (surface_num < HOW_MANY_GRAPHICS) {
+                for (int i = 0; i < surface_num; i++) SDL_FreeSurface(graphics[i]);
+                SDL_FreeSurface(screen);
+                SDL_DestroyTexture(scrtex);
+                SDL_DestroyWindow(window);
+                SDL_DestroyRenderer(renderer);
+                SDL_Quit();
+                return 1;
+        
+}
+
+        char text[128];
+        int czarny = SDL_MapRGB(screen->format, 0x00, 0x00, 0x00);
+        int zielony = SDL_MapRGB(screen->format, 0x00, 0xFF, 0x00);
+        int czerwony = SDL_MapRGB(screen->format, 0xFF, 0x00, 0x00);
+        int niebieski = SDL_MapRGB(screen->format, 0x11, 0x11, 0xCC);
+
+        int counter = 0;
+        while (!feof(level)) {
+                fgets(line, 11, level);
+                if (counter < how_many_blocks) interpretationOfLine(line, blocks, start_blocks, counter);
+                else if (counter - how_many_blocks < how_many_stars) interpretationOfLine(line, stars, start_stars, counter - how_many_blocks);
+                else interpretationOfLine(line, fairies, start_fairies, counter - how_many_blocks - how_many_stars);
+                counter++;
+        
+}
+
+        quit = 0;
+         
+        while (!quit) {
+                while (menu) {
+                        SDL_FillRect(screen, NULL, czarny);
+
+                        DrawSurface(screen, menu_screen, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2);
+
+                        SDL_UpdateTexture(scrtex, NULL, screen->pixels, screen->pitch);
+                        SDL_RenderCopy(renderer, scrtex, NULL, NULL);
+                        SDL_RenderPresent(renderer);
+
+                        while (SDL_PollEvent(&event)) {
+                                switch (event.type) {
+                                case SDL_KEYDOWN:
+                                        if (event.key.keysym.sym == SDLK_ESCAPE) {
+                                                quit = 1;
+                                                menu = 0;
+                                        
+}
+                                        else if (event.key.keysym.sym == SDLK_a) {
+                                                game = 1;
+                                                menu = 0;
+                                                end_of_game = 0;
+                                                lives = START_LIVES;
+                                                points = 0;
+                                        
+}
+                                        break;
+                                case SDL_QUIT:
+                                        quit = 1;
+                                        menu = 0;
+                                        break;
+                                
+}
+                        
+}
+                
+}
+                if (game) {
+                        t1 = SDL_GetTicks();
+
+                        background_pos[0] = SCREEN_WIDTH;
+                        background_pos[1] = SCREEN_HEIGHT / 2;
+
+                        frames = 0;
+                        fpsTimer = 0;
+                        fps = 0;
+                        worldTime = 0;
+                        worldTime2 = 0;
+                        worldTime3 = 0;
+
+                        game_type = 1;
+
+                        speed = 1;
+                        speed1 = 0;
+
+                        multiplayer[0] = 1;
+                        multiplayer[1] = 1;
+
+                        anime = 0;
+                        animate = 0;
+                        boom = 0;
+                        timer = 0;
+                        bomb = 0;
+                        timer2 = 0;
+
+                        jump = 0;
+                        double_jump = 0;
+                        dash = 0;
+                        jumps = 0;
+                        dash_count = 0;
+                        jump_h = 0;
+                        fall = 0;
+                        jump_a = INITIAL_JUMP_FORCE;
+                        
+                        alt_pos = 0;
+                        real_height = CHARACTER_START_H;
+
+                        for (int i = 0; i < how_many_blocks; i++) {
+                                blocks[0][i] = start_blocks[0][i];
+                                blocks[1][i] = start_blocks[1][i];
+                        
+}
+                        for (int i = 0; i < how_many_stars; i++) {
+                                stars[0][i] = start_stars[0][i];
+                                stars[1][i] = start_stars[1][i];
+                                explode[i] = 0;
+                        
+}
+                        for (int i = 0; i < how_many_fairies; i++) {
+                                fairies[0][i] = start_fairies[0][i];
+                                fairies[1][i] = start_fairies[1][i];
+                        
+}
+
+                        srand(time(NULL));
+                        randomizeThings(show_stars, how_many_stars);
+                        randomizeThings(show_fairies, how_many_fairies);
+                
+}
+                while (game) {
+                        t2 = SDL_GetTicks();
+
+                        // w tym momencie t2-t1 to czas w milisekundach,
+                        // jaki uplynał od ostatniego narysowania ekranu
+                        // delta to ten sam czas w sekundach
+                        // here t2-t1 is the time in milliseconds since
+                        // the last screen was drawn
+                        // delta is the same time in seconds
+                        delta = (t2 - t1) * 0.001;
+                        t1 = t2;
+
+                        worldTime2 = worldTime;
+                        worldTime += delta;
+                        worldTime3 = worldTime;
+                        if (worldTime3 > worldTime2) points++;
+
+                        SDL_FillRect(screen, NULL, czarny);
+
+                        for (int i = 0; i < how_many_stars; i++) {
+                                if (explode[i] && timer == 0) {
+                                        timer = 1;
+                                        bomb = i;
+                                
+}
+                        
+}
+                        if (timer > 0) timer++;
+                        if (timer == BOOM_SPEED) {
+                                boom++;
+                                timer = 1;
+                        
+}
+                        if (boom == ANIM_COMPLEXITY) {
+                                boom = 0;
+                                explode[bomb] = 0;
+                                timer = 0;
+                        
+}
+
+                        animate++;
+                        if (animate == ANIM_SPEED) {
+                                anime++;
+                                animate = 0;
+                        
+}
+                        if (anime == ANIM_COMPLEXITY) anime = 0;
+
+                        if (bonus > 0) timer2++;
+                        if (timer2 == SHOW_BONUS_TIME) {
+                                timer2 = 0;
+                                bonus = 0;
+                        
+}
+
+                        DrawSurface(screen, background, background_pos[0], background_pos[1]);
+                        for (int i = 0; i < how_many_blocks; i++) {
+                                DrawSurface(screen, block, blocks[0][i], blocks[1][i]);
+                        
+}
+                        for (int i = 0; i < how_many_stars; i++) {
+                                if (show_stars[i]) DrawSurface(screen, star, stars[0][i], stars[1][i]);
+                                else if (explode[i]) DrawSurface(screen, explosion[boom], stars[0][i], stars[1][i]);
+                                if (timer2 > 0) {
+                                        DrawRectangle(screen, SCREEN_WIDTH / 2 - 20, SCREEN_HEIGHT / 2 - 10, 170, 40, czarny, czarny);
+                                        sprintf_s(text, "BONUS POINTS: %i", bonus);
+                                        DrawString(screen, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, text, charset);
+                                
+}
+                        
+}
+                        for (int i = 0; i < how_many_fairies; i++) {
+                                if (show_fairies[i]) DrawSurface(screen, fairy[anime], fairies[0][i], fairies[1][i]);
+                                else if (timer2 > 0) {
+                                        DrawRectangle(screen, SCREEN_WIDTH / 2 - 20, SCREEN_HEIGHT / 2 - 20, 170, 40, czarny, czarny);
+                                        sprintf_s(text, "BONUS POINTS: %i", bonus);
+                                        DrawString(screen, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, text, charset);
+                                
+}
+                        
+}
+                        if (dash) DrawSurface(screen, unicornDash, CHARACTER_START_W, CHARACTER_START_H - alt_pos);
+                        else if (jump) DrawSurface(screen, unicornJump, CHARACTER_START_W, CHARACTER_START_H - alt_pos);
+                        else if (checkCollisionV(how_many_blocks, blocks, CHARACTER_START_W, CHARACTER_START_H - alt_pos, 1)) DrawSurface(screen, unicornFall, CHARACTER_START_W, CHARACTER_START_H - alt_pos);
+                        else DrawSurface(screen, unicorn[anime], CHARACTER_START_W, CHARACTER_START_H - alt_pos);
+                        for (int i = 0; i < START_LIVES; i++) {
+                                if (i < lives) DrawSurface(screen, heart, SCREEN_WIDTH - (i + 1) * 64, 32);
+                                else DrawSurface(screen, heart2, SCREEN_WIDTH - (i + 1) * 64, 32);
+                        
+}
+
+                        randomizeMovement(fairies, random_move, how_many_fairies);
+
+                        if (blocks[0][0] < start_blocks[0][0] - MAP_WIDTH * BLOCK_SIZE) {
+                                for (int i = 0; i < how_many_blocks; i++) {
+                                        blocks[0][i] = start_blocks[0][i];
+                                
+}
+                                for (int i = 0; i < how_many_stars; i++) {
+                                        stars[0][i] = start_stars[0][i];
+                                
+}
+                                for (int i = 0; i < how_many_fairies; i++) {
+                                        fairies[0][i] = start_fairies[0][i];
+                                
+}
+                                random_move[0] = 0;
+                                randomizeThings(show_stars, how_many_stars);
+                                randomizeThings(show_fairies, how_many_fairies);
+                        
+}
+
+                        if (background_pos[0] < 0) background_pos[0] = SCREEN_WIDTH;
+
+                        if (jump) {
+                                if (real_height <= CHARACTER_START_H || real_height > MAP_HEIGHT) {
+                                        alt_pos += JUMP_SPEED * jump_a;
+                                
+}
+                                else {
+                                        for (int i = 0; i < how_many_blocks; i++) {
+                                                blocks[1][i] += JUMP_SPEED * jump_a;
+                                        
+}
+                                        for (int i = 0; i < how_many_stars; i++) {
+                                                stars[1][i] += JUMP_SPEED * jump_a;
+                                        
+}
+                                        for (int i = 0; i < how_many_fairies; i++) {
+                                                fairies[1][i] += JUMP_SPEED * jump_a;
+                                        
+}
+                                        background_pos[1] += JUMP_SPEED * jump_a;
+                                
+}
+                                real_height -= JUMP_SPEED * jump_a;
+                                jump_a -= JUMP_SLOWING;
+                                if (jump_a < 1 || !checkCollisionV(how_many_blocks, blocks, CHARACTER_START_W, CHARACTER_START_H - alt_pos, 0) || CHARACTER_START_H - alt_pos < CHARACTER_HEIGHT / 2) {
+                                        jump = 0;
+                                        jump_a = INITIAL_JUMP_FORCE;
+                                
+}
+                        
+}
+
+                        checkCollision2(how_many_fairies, fairies, FAIRY_SIZE, CHARACTER_START_W, CHARACTER_START_H - alt_pos, show_fairies, dash, explode, &points, 1, multiplayer, &bonus);
+
+                        if (checkCollision(how_many_blocks, blocks, CHARACTER_START_W, CHARACTER_START_H - alt_pos) ||
+                                checkCollision2(how_many_stars, stars, STAR_SIZE, CHARACTER_START_W, CHARACTER_START_H - alt_pos, show_stars, dash, explode, &points, 0, multiplayer, &bonus) ||
+                                real_height > MAP_HEIGHT + 2 * CHARACTER_HEIGHT) {
+                                game = 0;
+                                death = 1;
+                        
+}
+
+                        if (checkCollisionV(how_many_blocks, blocks, CHARACTER_START_W, CHARACTER_START_H - alt_pos, 1)) {
+                                if (real_height <= CHARACTER_START_H || real_height > MAP_HEIGHT) {
+                                        alt_pos -= FALL_SPEED;
+                                        real_height += FALL_SPEED;
+                                
+}
+                                else {
+                                        for (int i = 0; i < how_many_blocks; i++) {
+                                                blocks[1][i] -= FALL_SPEED;
+                                        
+}
+                                        for (int i = 0; i < how_many_stars; i++) {
+                                                stars[1][i] -= FALL_SPEED;
+                                        
+}
+                                        for (int i = 0; i < how_many_fairies; i++) {
+                                                fairies[1][i] -= FALL_SPEED;
+                                        
+}
+                                        real_height += FALL_SPEED;
+                                        background_pos[1] -= FALL_SPEED;
+                                
+}
+                        
+}
+                        else {
+                                jumps = 0;
+                                if (dash && dash_count >= DASH_LENGTH) {
+                                        dash = 0;
+                                        dash_count = 0;
+                                
+}
+                                dash1 = 1;
+                        
+}
+
+                        if (game_type || go) {
+                                for (int i = 0; i < how_many_blocks; i++) {
+                                        blocks[0][i] -= BASE_RUN_SPEED * speed;
+                                
+}
+                                for (int i = 0; i < how_many_stars; i++) {
+                                        stars[0][i] -= BASE_RUN_SPEED * speed;
+                                
+}
+                                for (int i = 0; i < how_many_fairies; i++) {
+                                        fairies[0][i] -= BASE_RUN_SPEED * speed;
+                                
+}
+                                background_pos[0] -= BASE_RUN_SPEED * speed;
+                        
+}
+                        speed1++;
+                        if (speed1 == ACCELERATION_RATE) {
+                                if (speed < MAX_SPEED) speed++;
+                                speed1 = 0;
+                        
+}
+
+                        if (dash && dash_count < DASH_LENGTH) {
+                                for (int i = 0; i < how_many_blocks; i++) {
+                                        blocks[0][i] -= DASH_STRENGTH;
+                                
+}
+                                for (int i = 0; i < how_many_stars; i++) {
+                                        stars[0][i] -= DASH_STRENGTH;
+                                
+}
+                                for (int i = 0; i < how_many_fairies; i++) {
+                                        fairies[0][i] -= DASH_STRENGTH;
+                                
+}
+                                background_pos[0] -= DASH_STRENGTH;
+                                dash_count++;
+                        
+}
+
+                        if (dash_count >= DASH_LENGTH) {
+                                dash = 0;
+                                dash_count = 0;
+                        
+}
+
+                        fpsTimer += delta;
+                        if (fpsTimer > 0.5) {
+                                fps = frames * 2;
+                                frames = 0;
+                                fpsTimer -= 0.5;
+                        
+}
+                        
+                        DrawRectangle(screen, SCREEN_WIDTH - 160, 64, 120, 36, czarny, czarny);
+                        sprintf_s(text, "Points: %i", points);
+                        DrawString(screen, SCREEN_WIDTH - 150, 70, text, charset);
+                        sprintf_s(text, "Time: %.1lf s", worldTime);
+                        DrawString(screen, SCREEN_WIDTH - 150, 86, text, charset);
+                        
+                        SDL_UpdateTexture(scrtex, NULL, screen->pixels, screen->pitch);
+                        //              SDL_RenderClear(renderer);
+                        SDL_RenderCopy(renderer, scrtex, NULL, NULL);
+                        SDL_RenderPresent(renderer);
+
+                        while (SDL_PollEvent(&event)) {
+                                switch (event.type) {
+                                case SDL_KEYDOWN:
+                                        if (event.key.keysym.sym == SDLK_ESCAPE) {
+                                                menu = 1;
+                                                game = 0;
+                                        
+}
+                                        else if (event.key.keysym.sym == SDLK_z && jumps < 2) {
+                                                jumps++;
+                                                jump = 1;
+                                                jump_a = 4;
+                                        
+}
+                                        else if (event.key.keysym.sym == SDLK_x && dash1 == 1) {
+                                                dash = 1;
+                                                dash1 = 0;
+                                        
+}
+                                        else if (event.key.keysym.sym == SDLK_d) game_type = !game_type;
+                                        else if (event.key.keysym.sym == SDLK_RIGHT) go = 1;
+                                        break;
+                                case SDL_KEYUP:
+                                        go = 0;
+                                        break;
+                                case SDL_QUIT:
+                                        quit = 1;
+                                        game = 0;
+                                        break;
+                                
+}
+                        
+}
+
+                        t3 = SDL_GetTicks();
+                        delta = (t3 - t2) * 0.001;
+
+                        if (delta < (float)GAME_SPEED / 1000) Sleep(GAME_SPEED - delta * 1000);
+
+                        frames++;
+                        if (death) {
+                                timer = 1;
+                                boom = 0;
+                                while (timer != 0) {
+                                        if (timer > 0) timer++;
+                                        if (timer == BOOM_SPEED) {
+                                                boom++;
+                                                timer = 1;
+                                        
+}
+                                        if (boom == ANIM_COMPLEXITY) {
+                                                boom = 0;
+                                                timer = 0;
+                                        
+}
+                                        DrawSurface(screen, background, SCREEN_WIDTH - move, SCREEN_HEIGHT / 2);
+                                        for (int i = 0; i < how_many_blocks; i++) {
+                                                DrawSurface(screen, block, blocks[0][i], blocks[1][i]);
+                                        
+}
+                                        for (int i = 0; i < how_many_stars; i++) {
+                                                if (show_stars[i]) DrawSurface(screen, star, stars[0][i], stars[1][i]);
+                                                else if (explode[i]) DrawSurface(screen, explosion[boom], stars[0][i], stars[1][i]);
+                                        
+}
+                                        for (int i = 0; i < how_many_fairies; i++) {
+                                                if (show_fairies[i]) DrawSurface(screen, fairy[anime], fairies[0][i], fairies[1][i]);
+                                        
+}
+                                        DrawSurface(screen, explosion[boom], CHARACTER_START_W, CHARACTER_START_H - alt_pos);
+                                        for (int i = 0; i < START_LIVES; i++) {
+                                                if (i < lives) DrawSurface(screen, heart, SCREEN_WIDTH - (i + 1) * 64, 32);
+                                                else DrawSurface(screen, heart2, SCREEN_WIDTH - (i + 1) * 64, 32);
+                                        
+}
+                                        SDL_UpdateTexture(scrtex, NULL, screen->pixels, screen->pitch);
+                                        //              SDL_RenderClear(renderer);
+                                        SDL_RenderCopy(renderer, scrtex, NULL, NULL);
+                                        SDL_RenderPresent(renderer);
+                                
+}
+                        
+}
+                
+}
+                if (death) {
+                        lives--;
+                        if (lives == 0) end_of_game = 1;
+                
+}
+                while (death) {
+                        SDL_FillRect(screen, NULL, czarny);
+
+                        DrawSurface(screen, death_screen, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2);
+
+                        SDL_UpdateTexture(scrtex, NULL, screen->pixels, screen->pitch);
+                        SDL_RenderCopy(renderer, scrtex, NULL, NULL);
+                        SDL_RenderPresent(renderer);
+
+                        while (SDL_PollEvent(&event)) {
+                                switch (event.type) {
+                                case SDL_KEYDOWN:
+                                        if (event.key.keysym.sym == SDLK_ESCAPE) {
+                                                death = 0;
+                                                end_of_game = 1;
+                                        
+}
+                                        else if (event.key.keysym.sym == SDLK_a) {
+                                                game = 1;
+                                                death = 0;
+                                        
+}
+                                        break;
+                                case SDL_QUIT:
+                                        quit = 1;
+                                        death = 0;
+                                        break;
+                                
+}
+                        
+}
+                
+}
+                while (end_of_game) {
+                        SDL_FillRect(screen, NULL, czarny);
+
+                        DrawSurface(screen, gameover, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2);
+                        sprintf_s(text, "TOTAL POINTS: %i", points);
+                        DrawString(screen, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, text, charset);
+
+                        SDL_UpdateTexture(scrtex, NULL, screen->pixels, screen->pitch);
+                        SDL_RenderCopy(renderer, scrtex, NULL, NULL);
+                        SDL_RenderPresent(renderer);
+
+                        while (SDL_PollEvent(&event)) {
+                                switch (event.type) {
+                                case SDL_KEYDOWN:
+                                        if (event.key.keysym.sym == SDLK_ESCAPE) {
+                                                end_of_game = 0;
+                                                game = 0;
+                                                menu = 1;
+                                        
+}
+                                        else if (event.key.keysym.sym == SDLK_a) {
+                                                end_of_game = 0;
+                                                game = 0;
+                                                menu = 1;
+                                        
+}
+                                        break;
+                                case SDL_QUIT:
+                                        quit = 1;
+                                        death = 0;
+                                        break;
+                                
+}
+                        
+}
+
+                
+}
+        
+}
+        fclose(level);
+
+        for (int i = 0; i < HOW_MANY_GRAPHICS; i++) SDL_FreeSurface(graphics[i]);
+        SDL_FreeSurface(screen);
+        SDL_DestroyTexture(scrtex);
+        SDL_DestroyRenderer(renderer);
+        SDL_DestroyWindow(window);
+
+        free(blocks[0]);
+        free(blocks[1]);
+        free(start_blocks[0]);
+        free(start_blocks[1]);
+        free(stars[0]);
+        free(stars[1]);
+        free(start_stars[0]);
+        free(start_stars[1]);
+        free(show_stars);
+        free(explode);
+        free(fairies[0]);
+        free(fairies[1]);
+        free(start_fairies[0]);
+        free(start_fairies[1]);
+        free(show_fairies);
+
+        SDL_Quit();
+        return 0;
+        
+}
